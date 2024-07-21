@@ -1,0 +1,76 @@
+*blamer.txt*  For Neovim version 0.5+  Last change: 2023 July 21
+
+                            Blamer Plugin Manual
+
+==============================================================================
+CONTENTS                                                      *blamer-contents*
+
+    1. Introduction ........................... |blamer-introduction|
+    2. Installation ........................... |blamer-installation|
+    3. Configuration .......................... |blamer-configuration|
+    4. Usage .................................. |blamer-usage|
+    5. Commands ............................... |blamer-commands|
+    6. Mappings ............................... |blamer-mappings|
+    7. License ................................ |blamer-license|
+
+==============================================================================
+1. Introduction                                           *blamer-introduction*
+
+Blamer is a Neovim plugin for displaying Git blame information in vim-fugitive
+style with some enhancements. It provides a side-by-side view of blame
+information that updates in real-time as you edit.
+
+==============================================================================
+2. Installation                                           *blamer-installation*
+
+You can install Blamer using your preferred plugin manager. For example, with
+packer.nvim:
+>
+    use {
+      'psjay/blamer.nvim',
+      config = function()
+        require('blamer').setup()
+      end
+    }
+<
+==============================================================================
+3. Configuration                                         *blamer-configuration*
+
+Blamer can be configured through the `setup` function. Here are the default
+settings and available options:
+>
+    require('blamer').setup({
+      date_format = "%Y-%m-%d %H:%M",  -- Date format
+      window_width = 40,               -- Width of the blame window
+      show_summary = true              -- Whether to show commit summaries
+    })
+<
+==============================================================================
+4. Usage                                                         *blamer-usage*
+
+After installation, you can use the `:BlamerToggle` command to toggle the
+display of the blame information window.
+
+In the blame window, you can use `q` or `<ESC>` to close it.
+
+==============================================================================
+5. Commands                                                   *blamer-commands*
+
+:BlamerToggle                                                    *:BlamerToggle*
+    Toggle the display of the blame information window.
+
+==============================================================================
+6. Mappings                                                   *blamer-mappings*
+
+Blamer doesn't set any default key mappings, but you can create your own. For
+example:
+>
+    nnoremap <leader>b :BlamerToggle<CR>
+<
+==============================================================================
+7. License                                                     *blamer-license*
+
+Blamer is released under the MIT license.
+
+==============================================================================
+vim:tw=78:ts=8:ft=help:norl:
