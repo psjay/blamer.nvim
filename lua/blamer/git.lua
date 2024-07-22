@@ -69,18 +69,38 @@ local function parse_blame_output(blame_output)
 	return parsed_blame
 end
 
--- Function to get git blame information asynchronously
 local function async_get_git_blame(bufnr, callback)
 	local filepath = api.nvim_buf_get_name(bufnr)
 	local tempfile = fn.tempname()
-
 	-- Write buffer contents to temp file
 	local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	fn.writefile(lines, tempfile)
 
+	-- Find git root directory
+	local git_root_cmd =
+		string.format("git -C %s rev-parse --show-toplevel 2>/dev/null", fn.shellescape(fn.fnamemodify(filepath, ":h")))
+	local git_root = fn.trim(fn.system(git_root_cmd))
+
+	if git_root == "" then
+		-- Not in a git repository
+		callback(nil)
+		fn.delete(tempfile)
+		return
+	end
+
+	-- Get relative path from git root
+	local relative_path = fn.fnamemodify(filepath, ":.")
+	if fn.isdirectory(git_root) == 1 then
+		relative_path = fn.fnamemodify(filepath, ":s?" .. git_root .. "/?")
+	end
+
 	-- Prepare git blame command
-	local blame_cmd =
-		string.format("git blame --porcelain %s --contents %s", fn.shellescape(filepath), fn.shellescape(tempfile))
+	local blame_cmd = string.format(
+		"git -C %s blame --porcelain %s --contents %s",
+		fn.shellescape(git_root),
+		fn.shellescape(relative_path),
+		fn.shellescape(tempfile)
+	)
 
 	-- Run git blame asynchronously
 	fn.jobstart(blame_cmd, {
