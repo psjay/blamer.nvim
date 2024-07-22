@@ -73,6 +73,9 @@ local function write_buffer_binary(bufnr, filepath)
 	-- Get buffer line count
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local content = table.concat(lines, "\n")
+	if vim.bo[bufnr].eol then
+		content = content .. "\n"
+	end
 
 	-- Write content to file
 	local file = io.open(filepath, "wb") -- Open in binary mode
