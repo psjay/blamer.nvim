@@ -140,6 +140,9 @@ function M.show_blame()
 			if get_buff_for_target_win() ~= api.nvim_get_current_buf() then
 				return
 			end
+			if get_buff_for_target_win() == M.buf_to_blame then
+				return
+			end
 
 			if M.buf_to_blame_autocmd then
 				pcall(api.nvim_del_autocmd, M.buf_to_blame_autocmd)
