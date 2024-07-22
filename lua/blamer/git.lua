@@ -69,12 +69,26 @@ local function parse_blame_output(blame_output)
 	return parsed_blame
 end
 
+local function write_buffer_binary(bufnr, filepath)
+	-- Get buffer line count
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	local content = table.concat(lines, "\n")
+
+	-- Write content to file
+	local file = io.open(filepath, "wb") -- Open in binary mode
+	if file then
+		file:write(content)
+		file:close()
+	else
+		vim.notify("Error: Unable to open file for writing: " .. filepath, vim.log.levels.ERROR)
+	end
+end
+
 local function async_get_git_blame(bufnr, callback)
 	local filepath = api.nvim_buf_get_name(bufnr)
 	local tempfile = fn.tempname()
 	-- Write buffer contents to temp file
-	local lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	fn.writefile(lines, tempfile)
+	write_buffer_binary(bufnr, tempfile)
 
 	-- Find git root directory
 	local git_root_cmd =
