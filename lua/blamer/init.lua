@@ -95,12 +95,8 @@ function M.show_blame()
 	vim.wo[blame_winid].cursorline = true
 	api.nvim_win_set_width(blame_winid, options.window_width)
 
-	-- Enable scrollbind for both windows
-	vim.wo[blame_winid].scrollbind = true
-	vim.wo[blame_winid].cursorbind = true
+	-- Switch back to the original window
 	vim.api.nvim_set_current_win(current_winid)
-	vim.wo[current_winid].scrollbind = true
-	vim.wo[current_winid].cursorbind = true
 
 	-- Set up autocommands to disable scrollbind and clean up
 	local augroup = api.nvim_create_augroup("BlamerAuGroup", { clear = true })
@@ -118,6 +114,10 @@ function M.show_blame()
 		git.throttled_blame(buff, function(blame_info)
 			local formatted_blame = format_blame_info(blame_info)
 			M.update_blame_info(blame_bufnr, formatted_blame)
+			vim.wo[M.blame_winid].scrollbind = true
+			vim.wo[M.blame_winid].cursorbind = true
+			vim.wo[current_winid].scrollbind = true
+			vim.wo[current_winid].cursorbind = true
 			api.nvim_command("syncbind")
 		end)
 		M.buf_to_blame_autocmd = api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
