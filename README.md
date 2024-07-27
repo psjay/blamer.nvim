@@ -3,7 +3,7 @@
 Blamer is a Neovim plugin for displaying Git blame information in [vim-fugitive](https://github.com/tpope/vim-fugitive) style with some enhancements.
 ## Features
 
-https://github.com/user-attachments/assets/48f33096-087d-4452-bcd9-1fe7fc0a21eb
+https://github.com/user-attachments/assets/3c1b2088-f8f4-467c-a9f0-0c3320d8c4e9
 
 - Display Git blame information side by side
 - Real-time updates of blame information as you edit
