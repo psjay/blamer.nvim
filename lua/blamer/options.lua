@@ -14,16 +14,6 @@ local M = {
 		separator = "NonText", -- Separator highlight group
 		modified = "WarningMsg", -- Modified lines highlight group
 	},
-	hash_colors = {
-		"#e06c75", -- Red
-		"#98c379", -- Green
-		"#e5c07b", -- Yellow
-		"#61afef", -- Blue
-		"#c678dd", -- Purple
-		"#56b6c2", -- Cyan
-		"#828997", -- Gray
-	},
-	use_hash_colors = true, -- Whether to use different colors for different commit hashes
 	padding = {
 		left = 1, -- Left padding for each column
 		right = 1, -- Right padding for each column

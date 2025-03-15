@@ -7,6 +7,8 @@ local timer = vim.uv.new_timer()
 
 -- Function to parse git blame output
 local function parse_blame_output(blame_output)
+	if not blame_output then return {} end
+	
 	local parsed_blame = {}
 	local commit_cache = {}
 	local line_number = 0
@@ -21,47 +23,50 @@ local function parse_blame_output(blame_output)
 		if line:match("^%x+") then
 			line_number = line_number + 1
 			local hash, orig_line, final_line, group_lines = line:match("^(%x+)%s+(%d+)%s+(%d+)%s*(%d*)")
-
-			local current_commit
-			if commit_cache[hash] then
-				current_commit = vim.deepcopy(commit_cache[hash])
-			else
-				current_commit = {
-					hash = hash,
-					author = "",
-					time = 0,
-					time_str = "",
-					summary = "",
-					orig_line = tonumber(orig_line),
-					final_line = tonumber(final_line),
-					group_lines = tonumber(group_lines) or 1,
-				}
-				commit_cache[hash] = current_commit
-			end
-
-			current_commit.line_number = line_number
-
-			-- Parse additional information
-			while i <= #blame_output do
-				i = i + 1
-				local info_line = blame_output[i]
-				if info_line:match("^\t") then
-					break
-				end -- Content line starts
-
-				local key, value = info_line:match("^([%w-]+)%s(.+)")
-				if key and value then
-					current_commit[key] = value
-					commit_cache[hash][key] = value
+			
+			if hash then
+				local current_commit
+				if commit_cache[hash] then
+					current_commit = vim.deepcopy(commit_cache[hash])
+				else
+					current_commit = {
+						hash = hash,
+						author = "",
+						time = 0,
+						time_str = "",
+						summary = "",
+						orig_line = tonumber(orig_line),
+						final_line = tonumber(final_line),
+						group_lines = tonumber(group_lines) or 1,
+					}
+					commit_cache[hash] = current_commit
 				end
-			end
 
-			-- Add content line
-			if blame_output[i] and blame_output[i]:match("^\t") then
-				current_commit.content = blame_output[i]:sub(2) -- Remove leading tab
-			end
+				current_commit.line_number = line_number
 
-			table.insert(parsed_blame, current_commit)
+				-- Parse additional information
+				while i <= #blame_output do
+					i = i + 1
+					local info_line = blame_output[i]
+					if not info_line then break end
+					if info_line:match("^\t") then
+						break
+					end -- Content line starts
+
+					local key, value = info_line:match("^([%w-]+)%s(.+)")
+					if key and value then
+						current_commit[key] = value
+						commit_cache[hash][key] = value
+					end
+				end
+
+				-- Add content line
+				if blame_output[i] and blame_output[i]:match("^\t") then
+					current_commit.content = blame_output[i]:sub(2) -- Remove leading tab
+				end
+
+				table.insert(parsed_blame, current_commit)
+			end
 		end
 
 		i = i + 1
@@ -70,6 +75,10 @@ local function parse_blame_output(blame_output)
 end
 
 local function write_buffer_binary(bufnr, filepath)
+	if not api.nvim_buf_is_valid(bufnr) then
+		return false, "Invalid buffer"
+	end
+	
 	-- Get buffer line count
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local content = table.concat(lines, "\n")
@@ -82,13 +91,24 @@ local function write_buffer_binary(bufnr, filepath)
 	if file then
 		file:write(content)
 		file:close()
+		return true
 	else
-		vim.notify("Error: Unable to open file for writing: " .. filepath, vim.log.levels.ERROR)
+		return false, "Unable to open file for writing: " .. filepath
 	end
 end
 
 local function async_get_git_blame(bufnr, callback)
+	if not api.nvim_buf_is_valid(bufnr) then
+		callback(nil)
+		return
+	end
+	
 	local filepath = api.nvim_buf_get_name(bufnr)
+	if filepath == "" then
+		callback(nil)
+		return
+	end
+	
 	local tempfile = fn.tempname()
 	
 	-- Write buffer contents to temp file
@@ -96,6 +116,7 @@ local function async_get_git_blame(bufnr, callback)
 	if not success then
 		vim.notify("Error writing buffer to temp file: " .. (err or "unknown error"), vim.log.levels.ERROR)
 		fn.delete(tempfile)
+		callback(nil)
 		return
 	end
 
@@ -106,9 +127,8 @@ local function async_get_git_blame(bufnr, callback)
 
 	if git_root == "" then
 		-- Not in a git repository
-		vim.notify("Not in a git repository", vim.log.levels.WARN)
-		callback(nil)
 		fn.delete(tempfile)
+		callback(nil)
 		return
 	end
 
@@ -138,8 +158,9 @@ local function async_get_git_blame(bufnr, callback)
 		end,
 		on_exit = function(_, code)
 			fn.delete(tempfile)
-			if code ~= 0 then
+			if code ~= 0 and code ~= nil then
 				vim.notify("Git blame failed with code: " .. code, vim.log.levels.ERROR)
+				callback(nil)
 			end
 		end,
 	})
@@ -147,6 +168,7 @@ local function async_get_git_blame(bufnr, callback)
 	if job_id == 0 or job_id == -1 then
 		vim.notify("Failed to start git blame job", vim.log.levels.ERROR)
 		fn.delete(tempfile)
+		callback(nil)
 		return
 	end
 end
