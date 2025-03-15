@@ -14,6 +14,7 @@ M.original_window_settings = {
 M.hash_highlights = {}
 M.next_color_index = 1
 M.last_buffer = nil
+M.last_used_color = nil
 
 -- Function to convert hex color to RGB
 local function hex_to_rgb(hex)
@@ -98,8 +99,20 @@ local function make_muted(color)
 	return rgb_to_hex(r, g, b)
 end
 
+-- Function to get a color that is different from the last used color
+local function get_different_color(theme_colors, last_color_index)
+	local num_colors = #theme_colors
+	if num_colors <= 1 then
+		return theme_colors[1], 1
+	end
+	
+	-- Choose a color that is not the last used color
+	local new_index = (last_color_index % num_colors) + 1
+	return theme_colors[new_index], new_index
+end
+
 -- Function to get color for a commit hash
-local function get_hash_color(hash)
+local function get_hash_color(hash, prev_hash)
 	if not hash then return nil end
 	
 	if hash:match("^0+$") then
@@ -109,8 +122,36 @@ local function get_hash_color(hash)
 	if not M.hash_highlights[hash] then
 		local theme_colors = get_theme_colors()
 		if #theme_colors > 0 then
-			M.hash_highlights[hash] = theme_colors[M.next_color_index]
-			M.next_color_index = (M.next_color_index % #theme_colors) + 1
+			-- If this commit follows another commit with a known color,
+			-- make sure we choose a different color
+			if prev_hash and M.hash_highlights[prev_hash] then
+				-- Find the index of the previous color
+				local prev_color = M.hash_highlights[prev_hash]
+				local prev_index = nil
+				for i, color in ipairs(theme_colors) do
+					if color == prev_color then
+						prev_index = i
+						break
+					end
+				end
+				
+				-- Choose a different color
+				if prev_index then
+					local new_color, new_index = get_different_color(theme_colors, prev_index)
+					M.hash_highlights[hash] = new_color
+					M.next_color_index = new_index
+				else
+					-- Fallback if we can't find the previous color
+					M.hash_highlights[hash] = theme_colors[M.next_color_index]
+					M.next_color_index = (M.next_color_index % #theme_colors) + 1
+				end
+			else
+				-- No previous commit, just use the next color
+				M.hash_highlights[hash] = theme_colors[M.next_color_index]
+				M.next_color_index = (M.next_color_index % #theme_colors) + 1
+			end
+			
+			M.last_used_color = M.hash_highlights[hash]
 		end
 	end
 
@@ -124,6 +165,7 @@ local function setup_hash_highlights(blame_bufnr)
 		M.hash_highlights = {}
 		M.next_color_index = 1
 		M.last_buffer = blame_bufnr
+		M.last_used_color = nil
 	end
 end
 
@@ -134,6 +176,8 @@ local function format_blame_info(blame_info)
 	local formatted = {}
 	local max_lengths = { hash = 0, author = 0, time = 0 }
 	local hash_positions = {} -- Store hash positions for highlighting
+	local line_to_hash = {} -- Map line numbers to commit hashes
+	local sorted_lines = {} -- Store line numbers in order
 
 	-- First pass: calculate maximum lengths
 	for _, info in ipairs(blame_info) do
@@ -147,8 +191,16 @@ local function format_blame_info(blame_info)
 			max_lengths.hash = math.max(max_lengths.hash, #hash)
 			max_lengths.author = math.max(max_lengths.author, #author)
 			max_lengths.time = math.max(max_lengths.time, #time_str)
+			
+			if info.line_number then
+				line_to_hash[info.line_number] = info.hash
+				table.insert(sorted_lines, info.line_number)
+			end
 		end
 	end
+	
+	-- Sort line numbers
+	table.sort(sorted_lines)
 
 	-- Second pass: format with padding
 	for _, info in ipairs(blame_info) do
@@ -199,6 +251,14 @@ local function format_blame_info(blame_info)
 			end
 		end
 	end
+	
+	-- Third pass: find previous commit for each line
+	for i, line_num in ipairs(sorted_lines) do
+		local prev_line_num = sorted_lines[i-1]
+		if prev_line_num then
+			hash_positions[line_num].prev_hash = line_to_hash[prev_line_num]
+		end
+	end
 
 	return formatted, hash_positions
 end
@@ -224,7 +284,7 @@ M.update_blame_info = function(blame_bufnr, formatted_blame, hash_positions)
 	vim.api.nvim_buf_clear_namespace(blame_bufnr, ns_id, 0, -1)
 	
 	for line_num, pos_info in pairs(hash_positions) do
-		local commit_color = get_hash_color(pos_info.hash)
+		local commit_color = get_hash_color(pos_info.hash, pos_info.prev_hash)
 		if commit_color then
 			-- Apply column colors with different emphasis
 			local columns = pos_info.columns
