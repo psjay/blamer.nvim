@@ -7,6 +7,10 @@ M.buf_to_blame = nil
 M.buf_to_blame_autocmd = nil
 M.blame_winid = nil
 M.to_blamed_buf_win = nil
+M.original_window_settings = {
+	scrollbind = false,
+	cursorbind = false
+}
 
 -- Function to format blame information
 local function format_blame_info(blame_info)
@@ -58,21 +62,26 @@ local function format_blame_info(blame_info)
 end
 
 M.update_blame_info = function(blame_bufnr, formatted_blame)
-	if api.nvim_buf_is_valid(blame_bufnr) then
-		local blame_lines = {}
-		for i = 1, #formatted_blame do
-			table.insert(blame_lines, formatted_blame[i] or string.rep(" ", options.window_width))
-		end
-		vim.bo[blame_bufnr].modifiable = true
-		api.nvim_buf_set_lines(blame_bufnr, 0, -1, false, blame_lines)
-		vim.bo[blame_bufnr].modifiable = false
+	if not (api.nvim_buf_is_valid(blame_bufnr) and M.blame_winid and api.nvim_win_is_valid(M.blame_winid)) then
+		return
 	end
+	local blame_lines = {}
+	for i = 1, #formatted_blame do
+		table.insert(blame_lines, formatted_blame[i] or string.rep(" ", options.window_width))
+	end
+	vim.bo[blame_bufnr].modifiable = true
+	api.nvim_buf_set_lines(blame_bufnr, 0, -1, false, blame_lines)
+	vim.bo[blame_bufnr].modifiable = false
 end
 
 -- Function to show blame information in a new window
 function M.show_blame()
 	local current_bufnr = api.nvim_get_current_buf()
 	local current_winid = api.nvim_get_current_win()
+
+	-- Save original window settings
+	M.original_window_settings.scrollbind = vim.wo[current_winid].scrollbind
+	M.original_window_settings.cursorbind = vim.wo[current_winid].cursorbind
 
 	-- Create a new buffer for blame info
 	local blame_bufnr = api.nvim_create_buf(false, true)
@@ -191,12 +200,29 @@ function M.toggle_blame()
 	if M.blame_winid and api.nvim_win_is_valid(M.blame_winid) then
 		api.nvim_win_close(M.blame_winid, false)
 		M.blame_winid = nil
-		-- Disable scrollbind for the main window
-		vim.wo[M.to_blamed_buf_win].scrollbind = false
-		vim.wo[M.to_blamed_buf_win].cursorbind = false
+		-- Restore original settings
+		if M.to_blamed_buf_win and api.nvim_win_is_valid(M.to_blamed_buf_win) then
+			vim.wo[M.to_blamed_buf_win].scrollbind = M.original_window_settings.scrollbind
+			vim.wo[M.to_blamed_buf_win].cursorbind = M.original_window_settings.cursorbind
+		end
+		M.to_blamed_buf_win = nil
 	else
 		M.show_blame()
 	end
+end
+
+-- Cleanup function
+function M.cleanup()
+	if M.blame_winid and api.nvim_win_is_valid(M.blame_winid) then
+		api.nvim_win_close(M.blame_winid, false)
+	end
+	if M.buf_to_blame_autocmd then
+		pcall(api.nvim_del_autocmd, M.buf_to_blame_autocmd)
+	end
+	git.cleanup()
+	M.blame_winid = nil
+	M.buf_to_blame = nil
+	M.to_blamed_buf_win = nil
 end
 
 -- Setup function
@@ -206,6 +232,13 @@ function M.setup(opts)
 
 	-- Create user command
 	api.nvim_create_user_command("BlamerToggle", M.toggle_blame, {})
+	
+	-- Set up cleanup on VimLeavePre
+	api.nvim_create_autocmd("VimLeavePre", {
+		callback = function()
+			M.cleanup()
+		end,
+	})
 end
 
 return M

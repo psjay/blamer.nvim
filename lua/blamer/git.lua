@@ -90,16 +90,23 @@ end
 local function async_get_git_blame(bufnr, callback)
 	local filepath = api.nvim_buf_get_name(bufnr)
 	local tempfile = fn.tempname()
+	
 	-- Write buffer contents to temp file
-	write_buffer_binary(bufnr, tempfile)
+	local success, err = pcall(write_buffer_binary, bufnr, tempfile)
+	if not success then
+		vim.notify("Error writing buffer to temp file: " .. (err or "unknown error"), vim.log.levels.ERROR)
+		fn.delete(tempfile)
+		return
+	end
 
 	-- Find git root directory
-	local git_root_cmd =
-		string.format("git -C %s rev-parse --show-toplevel 2>/dev/null", fn.shellescape(fn.fnamemodify(filepath, ":h")))
+	local git_root_cmd = string.format("git -C %s rev-parse --show-toplevel 2>/dev/null", 
+		fn.shellescape(fn.fnamemodify(filepath, ":h")))
 	local git_root = fn.trim(fn.system(git_root_cmd))
 
 	if git_root == "" then
 		-- Not in a git repository
+		vim.notify("Not in a git repository", vim.log.levels.WARN)
 		callback(nil)
 		fn.delete(tempfile)
 		return
@@ -120,7 +127,7 @@ local function async_get_git_blame(bufnr, callback)
 	)
 
 	-- Run git blame asynchronously
-	fn.jobstart(blame_cmd, {
+	local job_id = fn.jobstart(blame_cmd, {
 		stdout_buffered = true,
 		on_stdout = function(_, data)
 			if data then
@@ -129,15 +136,27 @@ local function async_get_git_blame(bufnr, callback)
 				callback(parsed_blame)
 			end
 		end,
-		on_exit = function()
-			-- Clean up temp file
+		on_exit = function(_, code)
 			fn.delete(tempfile)
+			if code ~= 0 then
+				vim.notify("Git blame failed with code: " .. code, vim.log.levels.ERROR)
+			end
 		end,
 	})
+
+	if job_id == 0 or job_id == -1 then
+		vim.notify("Failed to start git blame job", vim.log.levels.ERROR)
+		fn.delete(tempfile)
+		return
+	end
 end
 
 -- Set up throttled update for the current buffer
 M.throttled_blame = function(buf_to_blame, callback)
+	if not api.nvim_buf_is_valid(buf_to_blame) then
+		return
+	end
+	
 	if timer:is_active() then
 		timer:stop()
 	end
@@ -148,6 +167,16 @@ M.throttled_blame = function(buf_to_blame, callback)
 			async_get_git_blame(buf_to_blame, callback)
 		end)
 	)
+end
+
+-- Cleanup function
+function M.cleanup()
+	if timer then
+		if timer:is_active() then
+			timer:stop()
+		end
+		timer:close()
+	end
 end
 
 return M

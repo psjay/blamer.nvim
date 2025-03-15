@@ -7,7 +7,7 @@ local M = {
 }
 
 M.merge_options = function(opts)
-	vim.tbl_deep_extend("force", M, opts or {})
+	M = vim.tbl_deep_extend("force", M, opts or {})
 end
 
 return M
