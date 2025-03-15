@@ -11,11 +11,47 @@ M.original_window_settings = {
 	scrollbind = false,
 	cursorbind = false
 }
+M.hash_highlights = {}
+M.next_color_index = 1
+
+-- Function to get color for a commit hash
+local function get_hash_color(hash)
+	if not options.use_hash_colors then
+		return nil
+	end
+
+	if hash:match("^0+$") then
+		return nil -- Use default color for modified files
+	end
+
+	if not M.hash_highlights[hash] then
+		M.hash_highlights[hash] = options.hash_colors[M.next_color_index]
+		M.next_color_index = (M.next_color_index % #options.hash_colors) + 1
+	end
+
+	return M.hash_highlights[hash]
+end
+
+-- Function to setup hash highlights
+local function setup_hash_highlights(blame_bufnr)
+	-- Clear existing highlights
+	for i = 1, 100 do -- Assuming we won't have more than 100 different commits in view
+		pcall(vim.api.nvim_buf_del_highlight, blame_bufnr, -1, "BlamerGitHash" .. i)
+	end
+
+	-- Reset color assignments if buffer changed
+	if M.last_buffer ~= blame_bufnr then
+		M.hash_highlights = {}
+		M.next_color_index = 1
+		M.last_buffer = blame_bufnr
+	end
+end
 
 -- Function to format blame information
 local function format_blame_info(blame_info)
 	local formatted = {}
 	local max_lengths = { hash = 0, author = 0, time = 0 }
+	local hash_positions = {} -- Store hash positions for highlighting
 
 	-- First pass: calculate maximum lengths
 	for _, info in ipairs(blame_info) do
@@ -42,35 +78,64 @@ local function format_blame_info(blame_info)
 			local time_str = is_modified and " " or (time and os.date(options.date_format, time))
 			local summary = is_modified and " " or info.summary
 
+			local padding = string.rep(" ", options.padding.left)
+			local sep = padding .. options.separator .. padding
+
 			local line = string.format(
-				"%-" .. max_lengths.hash .. "s | %-" .. max_lengths.author .. "s | %-" .. max_lengths.time .. "s",
+				"%-" .. max_lengths.hash .. "s%s%-" .. max_lengths.author .. "s%s%-" .. max_lengths.time .. "s",
 				hash,
+				sep,
 				author,
+				sep,
 				time_str
 			)
 			if options.show_summary then
-				line = line .. string.format(" | %s", summary)
+				line = line .. string.format("%s%s", sep, summary)
 			end
 
 			if info.line_number then
 				formatted[info.line_number] = line
+				-- Store hash position for highlighting
+				hash_positions[info.line_number] = {
+					hash = info.hash,
+					start_col = 0,
+					end_col = #hash
+				}
 			end
 		end
 	end
 
-	return formatted
+	return formatted, hash_positions
 end
 
-M.update_blame_info = function(blame_bufnr, formatted_blame)
+M.update_blame_info = function(blame_bufnr, formatted_blame, hash_positions)
 	if not (api.nvim_buf_is_valid(blame_bufnr) and M.blame_winid and api.nvim_win_is_valid(M.blame_winid)) then
 		return
 	end
+
+	setup_hash_highlights(blame_bufnr)
+
 	local blame_lines = {}
 	for i = 1, #formatted_blame do
 		table.insert(blame_lines, formatted_blame[i] or string.rep(" ", options.window_width))
 	end
+
 	vim.bo[blame_bufnr].modifiable = true
 	api.nvim_buf_set_lines(blame_bufnr, 0, -1, false, blame_lines)
+
+	-- Apply hash colors
+	if options.use_hash_colors then
+		for line_num, pos_info in pairs(hash_positions) do
+			local color = get_hash_color(pos_info.hash)
+			if color then
+				local hl_group = "BlamerGitHash" .. pos_info.hash:sub(1, 8)
+				-- Create highlight group if it doesn't exist
+				pcall(vim.cmd, string.format("highlight %s guifg=%s", hl_group, color))
+				vim.api.nvim_buf_add_highlight(blame_bufnr, -1, hl_group, line_num - 1, pos_info.start_col, pos_info.end_col)
+			end
+		end
+	end
+
 	vim.bo[blame_bufnr].modifiable = false
 end
 
@@ -102,7 +167,19 @@ function M.show_blame()
 	vim.wo[blame_winid].number = vim.wo[current_winid].number
 	vim.wo[blame_winid].relativenumber = vim.wo[current_winid].relativenumber
 	vim.wo[blame_winid].cursorline = true
+	vim.wo[blame_winid].signcolumn = "no"
 	api.nvim_win_set_width(blame_winid, options.window_width)
+
+	-- Set window border
+	if options.border ~= "none" then
+		local border = options.border
+		if type(border) == "string" then
+			border = vim.api.nvim_eval([[&encoding == "utf-8" ? "single" : "none"]])
+		end
+		api.nvim_win_set_config(blame_winid, {
+			border = border,
+		})
+	end
 
 	-- Switch back to the original window
 	vim.api.nvim_set_current_win(current_winid)
@@ -121,8 +198,8 @@ function M.show_blame()
 
 	local function setup_for_new_buff(buff)
 		git.throttled_blame(buff, function(blame_info)
-			local formatted_blame = format_blame_info(blame_info)
-			M.update_blame_info(blame_bufnr, formatted_blame)
+			local formatted_blame, hash_positions = format_blame_info(blame_info)
+			M.update_blame_info(blame_bufnr, formatted_blame, hash_positions)
 			vim.wo[M.blame_winid].scrollbind = true
 			vim.wo[M.blame_winid].cursorbind = true
 			vim.wo[current_winid].scrollbind = true
@@ -134,8 +211,8 @@ function M.show_blame()
 			buffer = buff,
 			callback = function()
 				git.throttled_blame(buff, function(blame_info)
-					local formatted_blame = format_blame_info(blame_info)
-					M.update_blame_info(blame_bufnr, formatted_blame)
+					local formatted_blame, hash_positions = format_blame_info(blame_info)
+					M.update_blame_info(blame_bufnr, formatted_blame, hash_positions)
 				end)
 			end,
 		})
