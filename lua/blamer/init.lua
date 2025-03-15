@@ -99,16 +99,30 @@ local function make_muted(color)
 	return rgb_to_hex(r, g, b)
 end
 
--- Function to get a color that is different from the last used color
-local function get_different_color(theme_colors, last_color_index)
+-- Simplified function to get a different color
+local function get_different_color(theme_colors, prev_color)
 	local num_colors = #theme_colors
 	if num_colors <= 1 then
-		return theme_colors[1], 1
+		return theme_colors[1]
 	end
 	
-	-- Choose a color that is not the last used color
-	local new_index = (last_color_index % num_colors) + 1
-	return theme_colors[new_index], new_index
+	-- Find the index of the previous color
+	local prev_index = nil
+	for i, color in ipairs(theme_colors) do
+		if color == prev_color then
+			prev_index = i
+			break
+		end
+	end
+	
+	-- Choose a color that is not the previous color
+	if prev_index then
+		local new_index = (prev_index % num_colors) + 1
+		return theme_colors[new_index]
+	else
+		-- If we can't find the previous color, just return the first color
+		return theme_colors[1]
+	end
 end
 
 -- Function to get color for a commit hash
@@ -125,33 +139,13 @@ local function get_hash_color(hash, prev_hash)
 			-- If this commit follows another commit with a known color,
 			-- make sure we choose a different color
 			if prev_hash and M.hash_highlights[prev_hash] then
-				-- Find the index of the previous color
 				local prev_color = M.hash_highlights[prev_hash]
-				local prev_index = nil
-				for i, color in ipairs(theme_colors) do
-					if color == prev_color then
-						prev_index = i
-						break
-					end
-				end
-				
-				-- Choose a different color
-				if prev_index then
-					local new_color, new_index = get_different_color(theme_colors, prev_index)
-					M.hash_highlights[hash] = new_color
-					M.next_color_index = new_index
-				else
-					-- Fallback if we can't find the previous color
-					M.hash_highlights[hash] = theme_colors[M.next_color_index]
-					M.next_color_index = (M.next_color_index % #theme_colors) + 1
-				end
+				M.hash_highlights[hash] = get_different_color(theme_colors, prev_color)
 			else
-				-- No previous commit, just use the next color
+				-- No previous commit, just use the next color in rotation
 				M.hash_highlights[hash] = theme_colors[M.next_color_index]
 				M.next_color_index = (M.next_color_index % #theme_colors) + 1
 			end
-			
-			M.last_used_color = M.hash_highlights[hash]
 		end
 	end
 
@@ -165,7 +159,6 @@ local function setup_hash_highlights(blame_bufnr)
 		M.hash_highlights = {}
 		M.next_color_index = 1
 		M.last_buffer = blame_bufnr
-		M.last_used_color = nil
 	end
 end
 
@@ -179,9 +172,9 @@ local function format_blame_info(blame_info)
 	local line_to_hash = {} -- Map line numbers to commit hashes
 	local sorted_lines = {} -- Store line numbers in order
 
-	-- First pass: calculate maximum lengths
+	-- First pass: calculate maximum lengths and collect line numbers
 	for _, info in ipairs(blame_info) do
-		if info and info.hash then
+		if info and info.hash and info.line_number then
 			local is_modified = info.hash:match("^0+$")
 			local hash = is_modified and "Not Committed" or info.hash:sub(1, 8)
 			local author = is_modified and " " or info.author
@@ -192,10 +185,8 @@ local function format_blame_info(blame_info)
 			max_lengths.author = math.max(max_lengths.author, #author)
 			max_lengths.time = math.max(max_lengths.time, #time_str)
 			
-			if info.line_number then
-				line_to_hash[info.line_number] = info.hash
-				table.insert(sorted_lines, info.line_number)
-			end
+			line_to_hash[info.line_number] = info.hash
+			table.insert(sorted_lines, info.line_number)
 		end
 	end
 	
@@ -272,7 +263,7 @@ M.update_blame_info = function(blame_bufnr, formatted_blame, hash_positions)
 
 	local blame_lines = {}
 	for i = 1, #formatted_blame do
-		table.insert(blame_lines, formatted_blame[i] or string.rep(" ", options.window_width))
+		blame_lines[i] = formatted_blame[i] or string.rep(" ", options.window_width)
 	end
 
 	vim.bo[blame_bufnr].modifiable = true
@@ -297,16 +288,16 @@ M.update_blame_info = function(blame_bufnr, formatted_blame, hash_positions)
 
 			-- Set up highlight groups with different emphasis
 			-- Hash: Make it vibrant (most prominent)
-			vim.api.nvim_set_hl(0, hash_hl_group, { fg = make_vibrant(commit_color), bold = true })
+			pcall(vim.api.nvim_set_hl, 0, hash_hl_group, { fg = make_vibrant(commit_color), bold = true })
 			
 			-- Author: Keep original color (prominent)
-			vim.api.nvim_set_hl(0, author_hl_group, { fg = commit_color })
+			pcall(vim.api.nvim_set_hl, 0, author_hl_group, { fg = commit_color })
 			
 			-- Date: Make it muted (less prominent)
-			vim.api.nvim_set_hl(0, date_hl_group, { fg = make_muted(commit_color) })
+			pcall(vim.api.nvim_set_hl, 0, date_hl_group, { fg = make_muted(commit_color) })
 			
 			-- Summary: Make it very muted (least prominent)
-			vim.api.nvim_set_hl(0, summary_hl_group, { fg = make_muted(commit_color), italic = true })
+			pcall(vim.api.nvim_set_hl, 0, summary_hl_group, { fg = make_muted(commit_color), italic = true })
 
 			-- Apply highlights
 			pcall(vim.api.nvim_buf_add_highlight, blame_bufnr, ns_id, hash_hl_group, line_num - 1, columns.hash.start, columns.hash["end"])
@@ -384,8 +375,7 @@ function M.show_blame()
 
 	local function get_buff_for_target_win()
 		if vim.api.nvim_win_is_valid(current_winid) then
-			local buf_id = vim.api.nvim_win_get_buf(current_winid)
-			return buf_id
+			return vim.api.nvim_win_get_buf(current_winid)
 		else
 			return nil
 		end
@@ -428,18 +418,14 @@ function M.show_blame()
 		pattern = "*",
 		nested = true,
 		callback = function()
-			if get_buff_for_target_win() ~= api.nvim_get_current_buf() then
-				return
-			end
-			if get_buff_for_target_win() == M.buf_to_blame then
+			local current_buf = get_buff_for_target_win()
+			if not current_buf or current_buf == M.buf_to_blame then
 				return
 			end
 
 			-- Set up autocommand for buffer changes
-			M.buf_to_blame = api.nvim_get_current_buf()
-			if M.buf_to_blame then
-				setup_for_new_buff(M.buf_to_blame)
-			end
+			M.buf_to_blame = current_buf
+			setup_for_new_buff(M.buf_to_blame)
 		end,
 	})
 
@@ -455,21 +441,20 @@ function M.show_blame()
 		end,
 	})
 
+	-- Set up keymaps to close the blame window
+	local close_callback = function()
+		if api.nvim_win_is_valid(blame_winid) then
+			api.nvim_win_close(blame_winid, true)
+		end
+	end
+	
 	api.nvim_buf_set_keymap(blame_bufnr, "n", "q", "", {
-		callback = function()
-			if api.nvim_win_is_valid(blame_winid) then
-				api.nvim_win_close(blame_winid, true)
-			end
-		end,
+		callback = close_callback,
 		noremap = true,
 		silent = true,
 	})
 	api.nvim_buf_set_keymap(blame_bufnr, "n", "<ESC>", "", {
-		callback = function()
-			if api.nvim_win_is_valid(blame_winid) then
-				api.nvim_win_close(blame_winid, true)
-			end
-		end,
+		callback = close_callback,
 		noremap = true,
 		silent = true,
 	})
