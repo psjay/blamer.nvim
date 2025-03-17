@@ -7,7 +7,10 @@ local timer = vim.uv.new_timer()
 
 -- Function to parse git blame output
 local function parse_blame_output(blame_output)
-	if not blame_output then return {} end
+	if not blame_output then 
+		vim.notify("No blame output received", vim.log.levels.ERROR)
+		return {} 
+	end
 	
 	local parsed_blame = {}
 	local commit_cache = {}
@@ -71,28 +74,46 @@ local function parse_blame_output(blame_output)
 
 		i = i + 1
 	end
+
 	return parsed_blame
 end
 
 local function write_buffer_binary(bufnr, filepath)
 	if not api.nvim_buf_is_valid(bufnr) then
+		vim.notify("Invalid buffer number: " .. tostring(bufnr), vim.log.levels.ERROR)
 		return false, "Invalid buffer"
 	end
 	
 	-- Get buffer line count
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local content = table.concat(lines, "\n")
+	if not lines then
+		vim.notify("Failed to get buffer lines", vim.log.levels.ERROR)
+		return false, "Failed to get buffer lines"
+	end
+
+	-- Use neovim's fileformat setting to determine line ending
+	local line_ending = vim.bo[bufnr].fileformat == "dos" and "\r\n" or "\n"
+
+	-- Join lines with the appropriate line ending
+	local content = table.concat(lines, line_ending)
 	if vim.bo[bufnr].eol then
-		content = content .. "\n"
+		content = content .. line_ending
 	end
 
 	-- Write content to file
 	local file = io.open(filepath, "wb") -- Open in binary mode
 	if file then
-		file:write(content)
-		file:close()
+		local success, err = pcall(function()
+			file:write(content)
+			file:close()
+		end)
+		if not success then
+			vim.notify("Error writing to temp file: " .. (err or "unknown error"), vim.log.levels.ERROR)
+			return false, "Error writing to temp file: " .. (err or "unknown error")
+		end
 		return true
 	else
+		vim.notify("Unable to open file for writing: " .. filepath, vim.log.levels.ERROR)
 		return false, "Unable to open file for writing: " .. filepath
 	end
 end
@@ -127,6 +148,7 @@ local function async_get_git_blame(bufnr, callback)
 
 	if git_root == "" then
 		-- Not in a git repository
+		vim.notify("Not in a git repository: " .. filepath, vim.log.levels.ERROR)
 		fn.delete(tempfile)
 		callback(nil)
 		return
